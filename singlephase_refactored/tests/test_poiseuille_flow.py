@@ -3,7 +3,7 @@ import numpy as np
 import taichi as ti
 # Ensure the LBM_3D_SinglePhase_Solver can be imported.
 # This might require setting PYTHONPATH or running the test from the directory above singlephase_refactored.
-from singlephase_refactored.LBM_3D_SinglePhase_Solver import LB3D_Solver_Single_Phase
+from ..LBM_3D_SinglePhase_Solver import LB3D_Solver_Single_Phase
 
 # Copied from example_poiseuille_flow.py for self-containment of the test
 def calculate_analytical_poiseuille_velocity(fx_body_force_term: float,
@@ -63,8 +63,7 @@ class TestPoiseuilleFlow(unittest.TestCase):
         """
         ti.reset() # Reset Taichi state for a clean test run
         # Use CPU for potentially faster test initialization and execution for small sims.
-        # dynamic_index=False and kernel_profiler=False are good defaults for tests.
-        ti.init(arch=ti.cpu, dynamic_index=False, kernel_profiler=False)
+        ti.init(arch=ti.cpu)
 
         # Simulation parameters (small values for a quick test)
         nx, ny, nz = 3, 10, 3  # Small domain: 3x10x3 (flow in x, channel height in y)

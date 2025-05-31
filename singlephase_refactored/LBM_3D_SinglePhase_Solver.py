@@ -190,15 +190,22 @@ class LB3D_Solver_Single_Phase:
     @ti.kernel
     def init(self):
         """Initializes fields to rest state."""
-        for i,j,k in self.solid:
-            if (self.sparse_storage==False or ti.is_active(self.solid.parent(),[i,j,k])):
+        for i,j,k in ti.ndrange(self.nx, self.ny, self.nz):
+            is_fluid_node = False
+            if ti.static(self.sparse_storage):
+                if ti.is_active(self.solid.snode.parent(), [i,j,k]) and self.solid[i,j,k] == 0:
+                    is_fluid_node = True
+            else:
                 if self.solid[i,j,k] == 0:
-                    self.rho[i,j,k] = 1.0
-                    self.v[i,j,k] = ti.Vector([0.0, 0.0, 0.0])
-                    for s_idx in ti.static(range(19)):
-                        eq = self.feq(s_idx, 1.0, self.v[i,j,k])
-                        self.f[i,j,k][s_idx] = eq
-                        self.F[i,j,k][s_idx] = eq
+                    is_fluid_node = True
+
+            if is_fluid_node:
+                self.rho[i,j,k] = 1.0
+                self.v[i,j,k] = ti.Vector([0.0, 0.0, 0.0])
+                for s_idx in ti.static(range(19)):
+                    eq = self.feq(s_idx, 1.0, self.v[i,j,k])
+                    self.f[i,j,k][s_idx] = eq
+                    self.F[i,j,k][s_idx] = eq
 
     def init_geo(self, filename: str):
         """Initializes geometry from file."""
@@ -256,9 +263,9 @@ class LB3D_Solver_Single_Phase:
         return out
 
     @ti.func
-    def cal_local_force(self,i,j,k):
-        f_vec = ti.Vector([self.fx, self.fy, self.fz])
-        return f_vec
+    def cal_local_force(self,i,j,k): # i,j,k currently unused, but kept for signature
+        # Use the Taichi field self.ext_f that holds the force components
+        return self.ext_f[None]
 
     @ti.func
     def _calculate_guo_force_moment_contribution(self, s_moment_index: ti.i32, local_v: ti.template(), local_force_vector: ti.template()) -> ti.f32:
@@ -321,7 +328,7 @@ class LB3D_Solver_Single_Phase:
     def Boundary_condition(self):
         """Applies fixed pressure boundary conditions."""
         # x_left boundary (i=0)
-        if ti.static(self.bc_type_x_left[None] == 1): # 1: Fixed Pressure
+        if self.bc_type_x_left[None] == 1: # 1: Fixed Pressure
             for j,k in ti.ndrange(self.ny, self.nz):
                 if self.solid[0,j,k] == 0:
                     v_bc_node = self.v[0,j,k]
@@ -331,7 +338,7 @@ class LB3D_Solver_Single_Phase:
                         self.F[0,j,k][s_idx] = self.feq(s_idx, self.bc_value_rho_x_left[None], v_bc_node)
 
         # x_right boundary (i = self.nx-1)
-        if ti.static(self.bc_type_x_right[None] == 1):
+        if self.bc_type_x_right[None] == 1:
             for j,k in ti.ndrange(self.ny, self.nz):
                 if self.solid[self.nx-1,j,k] == 0:
                     v_bc_node = self.v[self.nx-1,j,k]
@@ -341,7 +348,7 @@ class LB3D_Solver_Single_Phase:
                         self.F[self.nx-1,j,k][s_idx] = self.feq(s_idx, self.bc_value_rho_x_right[None], v_bc_node)
 
         # y_left boundary (j=0)
-        if ti.static(self.bc_type_y_left[None] == 1):
+        if self.bc_type_y_left[None] == 1:
             for i,k in ti.ndrange(self.nx, self.nz):
                 if self.solid[i,0,k] == 0:
                     v_bc_node = self.v[i,0,k]
@@ -351,7 +358,7 @@ class LB3D_Solver_Single_Phase:
                         self.F[i,0,k][s_idx] = self.feq(s_idx, self.bc_value_rho_y_left[None], v_bc_node)
 
         # y_right boundary (j = self.ny-1)
-        if ti.static(self.bc_type_y_right[None] == 1):
+        if self.bc_type_y_right[None] == 1:
             for i,k in ti.ndrange(self.nx, self.nz):
                 if self.solid[i,self.ny-1,k] == 0:
                     v_bc_node = self.v[i,self.ny-1,k]
@@ -361,7 +368,7 @@ class LB3D_Solver_Single_Phase:
                         self.F[i,self.ny-1,k][s_idx] = self.feq(s_idx, self.bc_value_rho_y_right[None], v_bc_node)
 
         # z_left boundary (k=0)
-        if ti.static(self.bc_type_z_left[None] == 1):
+        if self.bc_type_z_left[None] == 1:
             for i,j in ti.ndrange(self.nx, self.ny):
                 if self.solid[i,j,0] == 0:
                     v_bc_node = self.v[i,j,0]
@@ -371,7 +378,7 @@ class LB3D_Solver_Single_Phase:
                         self.F[i,j,0][s_idx] = self.feq(s_idx, self.bc_value_rho_z_left[None], v_bc_node)
 
         # z_right boundary (k = self.nz-1)
-        if ti.static(self.bc_type_z_right[None] == 1):
+        if self.bc_type_z_right[None] == 1:
             for i,j in ti.ndrange(self.nx, self.ny):
                 if self.solid[i,j,self.nz-1] == 0:
                     v_bc_node = self.v[i,j,self.nz-1]
