@@ -2,7 +2,9 @@ import taichi as ti
 import numpy as np
 import time
 
-ti.init(arch=ti.gpu, dynamic_index=False, kernel_profiler=True, print_ir=False)
+# ti.init(arch=ti.gpu, dynamic_index=False, kernel_profiler=True, print_ir=False)
+# Default initialization or specify arch only, other params might be deprecated/changed.
+ti.init(arch=ti.gpu)
 
 @ti.data_oriented
 class LB2D_Solver_Single_Phase:
@@ -63,7 +65,7 @@ class LB2D_Solver_Single_Phase:
 
         self.x = np.linspace(0, nx, nx)
         self.y = np.linspace(0, ny, ny)
-        
+
         self._define_d2q9_parameters()
 
 
@@ -87,7 +89,7 @@ class LB2D_Solver_Single_Phase:
             1.0/36.0, # 7 (north-west) Error in comment, should be south-east
             1.0/36.0  # 8 (south-east) Error in comment, should be north-west
         ], dtype=float) # Corrected order below
-        
+
         w_np_corrected = np.array([
             4.0/9.0,  # 0
             1.0/9.0,  # 1 (E)
@@ -114,7 +116,7 @@ class LB2D_Solver_Single_Phase:
             [0,  1,  1, -1, -1,  0,  0,  0,  0],
             [0,  0,  0,  0,  0,  1,  1, -1, -1]
         ], dtype=np.float32)
-        
+
         try:
             inv_M_np = np.linalg.inv(M_np)
         except np.linalg.LinAlgError:
@@ -140,7 +142,7 @@ class LB2D_Solver_Single_Phase:
         self.tau_f = 3.0 * self.niu + 0.5
         s_nu = 1.0 / self.tau_f  # Relaxation rate for shear viscosity
         s_q = 8.0 * (2.0 - s_nu) / (8.0 - s_nu) # Relaxation rate for other moments (common choice)
-        
+
         # Define relaxation rates for D2Q9 moments (Lallemand & Luo, PRE 2000)
         # Moments: rho, e, eps, jx, qx, jy, qy, pxx, pxy
         # s0: rho (conserved)
@@ -163,7 +165,7 @@ class LB2D_Solver_Single_Phase:
         # s_eps related to s_e
         # s_q (energy flux moments qx, qy) usually s_q (same as s_other in 3D code)
         # s_nu for stress moments (pxx, pxy) -> s_v in 3D code
-        
+
         # Lallemand & Luo relaxation rates for D2Q9 (rho, e, eps, jx, qx, jy, qy, pxx, pxy)
         # s_b: bulk viscosity relaxation rate. Often s_b = s_nu for simplicity if bulk effects are not critical.
         s_b = s_nu # Assuming bulk viscosity = shear viscosity for simplicity
@@ -208,13 +210,13 @@ class LB2D_Solver_Single_Phase:
                 for s_idx in ti.static(range(self.q_dim)):
                     self.f[i, j][s_idx] = self.feq(s_idx, 1.0, self.v[i, j])
                     self.F[i, j][s_idx] = self.feq(s_idx, 1.0, self.v[i, j])
-    
+
     def init_geo(self, geo_array: np.ndarray): # Expects a 2D boolean numpy array
         if geo_array.ndim != 2:
             raise ValueError("Geometry array must be 2D.")
         if geo_array.shape[0] != self.nx or geo_array.shape[1] != self.ny:
             raise ValueError(f"Geometry array shape {geo_array.shape} does not match simulation domain ({self.nx}, {self.ny}).")
-        
+
         solid_int_array = geo_array.astype(np.int8) # Convert boolean to int8 for Taichi field
         self.solid.from_numpy(solid_int_array)
 
@@ -231,7 +233,7 @@ class LB2D_Solver_Single_Phase:
         m_eq = ti.Vector([0.0] * self.q_dim)
         ux, uy = u[0], u[1]
         ux2, uy2 = ux * ux, uy * uy
-        
+
         m_eq[0] = rho_local
         m_eq[1] = rho_local * (3.0 * (ux2 + uy2) - 2.0) # e (energy) term, check definition if not L&L
         # The definition of 'e' moment varies. L&L: rho * (3*(vx^2+vy^2) - 2*cs^2*D) where D=2
@@ -290,7 +292,7 @@ class LB2D_Solver_Single_Phase:
         # For now, using standard polynomial equilibrium moments:
         j_x = rho_local * ux
         j_y = rho_local * uy
-        
+
         m_eq[0] = rho_local
         m_eq[1] = j_x  # This is NOT e. Corresponds to M[1] being [-4, -1, -1, -1, -1, 2, 2, 2, 2] * f
                        # This M is for [rho, e, eps, jx, qx, jy, qy, pxx, pxy]
@@ -315,7 +317,7 @@ class LB2D_Solver_Single_Phase:
         # qy_eq = rho * uy * (-1 + 1.5*(ux^2+uy^2)) (this is one form for qy) or simply rho*uy for M[6]
         # pxx_eq = rho * (ux^2 - uy^2)
         # pxy_eq = rho * ux*uy
-        
+
         # Corrected meq for the given M matrix structure (common D2Q9 MRT)
         m_eq[0] = rho_local                                 # rho
         m_eq[1] = rho_local * (-2.0 + 3.0 * (ux2 + uy2))     # e
@@ -338,7 +340,7 @@ class LB2D_Solver_Single_Phase:
         m_eq[5] = rho_local * uy                            # jy
         m_eq[7] = rho_local * (ux2 - uy2)                   # pxx (stress xx)
         m_eq[8] = rho_local * ux * uy                       # pxy (stress xy)
-        
+
         # For qx, qy (moments m4, m6), these are often related to higher order terms or set to 0 for some models.
         # Or they are related to jx, jy.
         # For the given M matrix, m4 (qx) and m6 (qy) are usually non-zero at equilibrium.
@@ -366,13 +368,13 @@ class LB2D_Solver_Single_Phase:
             if self.solid[i, j] == 0: # Fluid node
                 # Calculate moments m from F
                 m_temp = self.M[None] @ self.F[i, j]
-                
+
                 # Calculate equilibrium moments meq
                 meq = self.meq_vec(self.rho[i, j], self.v[i, j])
-                
+
                 # Collision step in moment space (MRT)
                 m_coll = m_temp - self.S_dig[None] * (m_temp - meq)
-                
+
                 # Force term (Guo et al. forcing scheme for MRT)
                 # F_s = M * Sigma_s * inv_M * S_force
                 # S_force_alpha = w_alpha * ( (e_alpha - u)/cs^2 + (e_alpha . u)e_alpha / cs^4 ) . F_body
@@ -405,7 +407,7 @@ class LB2D_Solver_Single_Phase:
                     # The 3D code uses: w_l * ( (e_l-u).f/3 + (e_l.u)(e_l.f)/9 ) * M_sl
                     # This corresponds to: w_l * ( (e_l-u).f/cs^2 + (e_l.u)(e_l.f)/(cs^2*cs^2) ) * M_sl if cs^2 = 1/3
                     # This is the standard Guo forcing term for MRT.
-                    
+
                     force_moment_source = ti.Vector([0.0] * self.q_dim)
                     vel_ij = self.v[i,j] # Current velocity at node
 
@@ -413,7 +415,7 @@ class LB2D_Solver_Single_Phase:
                         e_alpha_minus_u = self.e[s_alpha] - vel_ij
                         e_alpha_dot_u = self.e[s_alpha].dot(vel_ij)
                         e_alpha_dot_f_body = self.e[s_alpha].dot(f_body)
-                        
+
                         # Guo's original source term for f_alpha (not moment space directly)
                         # F_alpha_src = w_alpha * ( (e_alpha-u)/cs^2 . F_b + (e_alpha.u)(e_alpha.F_b)/cs^4 )
                         # The 3D code's version:
@@ -426,18 +428,18 @@ class LB2D_Solver_Single_Phase:
                         # Let's calculate Psi_l (source term for distribution function f_l)
                         psi_l = self.w[s_alpha] * ( (e_alpha_minus_u.dot(f_body) / cs_sq) + \
                                                 (e_alpha_dot_u * e_alpha_dot_f_body / (cs_sq * cs_sq)) )
-                        
+
                         # Add to the moment source: M_s_l * psi_l
                         for s_moment_idx in ti.static(range(self.q_dim)):
                             force_moment_source[s_moment_idx] += self.M[None][s_moment_idx, s_alpha] * psi_l
-                    
+
                     # Add to collided moments
                     for s_idx in ti.static(range(self.q_dim)):
                         m_coll[s_idx] += (1.0 - 0.5 * self.S_dig[None][s_idx]) * force_moment_source[s_idx]
 
                 # Transform back to distribution functions f
                 self.f[i, j] = self.inv_M[None] @ m_coll
-    
+
     @ti.func
     def periodic_index(self, i_coord, j_coord): # 2D periodic boundary
         i_out, j_out = i_coord, j_coord
@@ -455,7 +457,7 @@ class LB2D_Solver_Single_Phase:
                     # Get destination coordinates
                     i_dest = i + self.e[s_idx][0]
                     j_dest = j + self.e[s_idx][1]
-                    
+
                     # Periodic boundary condition for streaming
                     i_p, j_p = self.periodic_index(i_dest, j_dest) # ip = periodic_index(i_node + e[s])
                                                                     # In 3D: ip = self.periodic_index(i+self.e[s])
@@ -487,10 +489,10 @@ class LB2D_Solver_Single_Phase:
                              vel_b = ti.Vector([self.vx_bcxl, self.vy_bcxl]) # Use specified BC velocity if inner is solid
                         else: # Inner node is fluid
                              vel_b = self.v[1, j_coord] # Extrapolate velocity from the first fluid layer inside
-                        
+
                         for s_idx in ti.static(range(self.q_dim)):
                             self.F[0, j_coord][s_idx] = self.feq(s_idx, rho_b, vel_b)
-                            
+
                     elif ti.static(self.bc_x_left == 2): # Fix velocity
                         rho_b = self.rho[0,j_coord] # Use current density (or from neighbor: self.rho[1,j_coord])
                                                     # Zou-He: rho is calculated from unknown f_i.
@@ -506,7 +508,7 @@ class LB2D_Solver_Single_Phase:
                 if self.solid[self.nx - 1, j_coord] == 0:
                     if ti.static(self.bc_x_right == 1): # Fix pressure
                         rho_b = self.rho_bcxr
-                        vel_b = self.v[self.nx-1, j_coord] 
+                        vel_b = self.v[self.nx-1, j_coord]
                         if self.solid[self.nx-2, j_coord] > 0:
                             vel_b = ti.Vector([self.vx_bcxr, self.vy_bcxr])
                         else:
@@ -520,7 +522,7 @@ class LB2D_Solver_Single_Phase:
                         vel_b = ti.Vector([self.vx_bcxr, self.vy_bcxr])
                         for s_idx in ti.static(range(self.q_dim)):
                             self.F[self.nx - 1, j_coord][s_idx] = self.feq(s_idx, rho_b, vel_b)
-        
+
         # Y-boundaries
         if ti.static(self.bc_y_left != 0):
             for i_coord in range(self.nx):
@@ -540,7 +542,7 @@ class LB2D_Solver_Single_Phase:
                         vel_b = ti.Vector([self.vx_bcyl, self.vy_bcyl])
                         for s_idx in ti.static(range(self.q_dim)):
                             self.F[i_coord, 0][s_idx] = self.feq(s_idx, rho_b, vel_b)
-                            
+
         if ti.static(self.bc_y_right != 0):
             for i_coord in range(self.nx):
                 if self.solid[i_coord, self.ny - 1] == 0:
@@ -568,17 +570,17 @@ class LB2D_Solver_Single_Phase:
             if self.solid[i, j] == 0: # Fluid node
                 self.rho[i, j] = 0.0
                 self.v[i, j] = ti.Vector([0.0, 0.0])
-                
+
                 current_f_sum = 0.0
                 for s_idx in ti.static(range(self.q_dim)):
                     self.f[i,j][s_idx] = self.F[i,j][s_idx] # Copy F (post-streaming) to f (pre-collision for next step)
                     current_f_sum += self.f[i,j][s_idx]
                     self.v[i,j] += self.e[s_idx] * self.f[i,j][s_idx]
-                
+
                 self.rho[i,j] = current_f_sum
-                
+
                 f_body_local = self.cal_local_force(i, j) # Body force F_b
-                
+
                 if self.rho[i,j] > 1e-6 : # Avoid division by zero if density is too low
                     self.v[i,j] /= self.rho[i,j]
                     # Add force contribution to velocity (standard LBM, second-order accurate)
@@ -605,7 +607,7 @@ class LB2D_Solver_Single_Phase:
         for I in ti.grouped(self.rho): # Correct iteration for Taichi fields
             if self.solid[I] == 0:
                  ti.atomic_max(self.max_v[None], self.v[I].norm())
-    
+
     # Boundary condition setters
     def set_bc_vel_x1(self, vel: list): # vel = [vx, vy]
         self.bc_x_right = 2
@@ -626,7 +628,7 @@ class LB2D_Solver_Single_Phase:
     def set_bc_rho_x0(self, rho_val: float):
         self.bc_x_left = 1
         self.rho_bcxl = rho_val
-    
+
     def set_bc_rho_x1(self, rho_val: float):
         self.bc_x_right = 1
         self.rho_bcxr = rho_val
@@ -634,7 +636,7 @@ class LB2D_Solver_Single_Phase:
     def set_bc_rho_y0(self, rho_val: float):
         self.bc_y_left = 1
         self.rho_bcyl = rho_val
-    
+
     def set_bc_rho_y1(self, rho_val: float):
         self.bc_y_right = 1
         self.rho_bcyr = rho_val
@@ -654,7 +656,7 @@ class LB2D_Solver_Single_Phase:
             self.force_flag = 1
         else:
             self.force_flag = 0
-            
+
     def step(self):
         self.colission()
         self.streaming1() # Includes bounce-back
@@ -670,20 +672,20 @@ if __name__ == '__main__':
     # Create a simple geometry: channel flow with a square obstacle
     geometry = np.zeros((nx, ny), dtype=bool)
     geometry[nx//4 : nx//4 + 10, ny//2 - 5 : ny//2 + 5] = True # Obstacle
-    
+
     lbm_solver.init_geo(geometry)
-    
+
     # Set boundary conditions: Poiseuille flow inlet/outlet (example)
     # Inlet: fixed velocity (parabolic profile can be complex to set directly this way)
     # For simplicity, using uniform velocity inlet
-    inlet_vel_x = 0.01 
+    inlet_vel_x = 0.01
     lbm_solver.set_bc_vel_x0([inlet_vel_x, 0.0]) # Inlet velocity at x=0
     lbm_solver.bc_x_left = 2 # Fix velocity mode
 
     # Outlet: fixed pressure (density)
     lbm_solver.set_bc_rho_x1(1.0) # Outlet pressure at x=nx-1
     lbm_solver.bc_x_right = 1 # Fix pressure mode
-    
+
     # Top and bottom walls: no-slip (implicitly handled by solid geometry and bounce-back)
     # If domain boundaries are walls:
     # geometry[:, 0] = True
@@ -701,7 +703,7 @@ if __name__ == '__main__':
             max_v = lbm_solver.get_max_v()
             print(f"Iteration: {iter_num}, Max Velocity: {max_v:.4e}")
             # Add plotting or data saving here if needed
-            
+
     # Retrieve data for plotting (example)
     # rho_data = lbm_solver.rho.to_numpy()
     # v_data = lbm_solver.v.to_numpy() # v_data[:,:,0] for vx, v_data[:,:,1] for vy

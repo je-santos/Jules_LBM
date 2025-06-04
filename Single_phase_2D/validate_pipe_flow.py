@@ -6,10 +6,12 @@ from lbm_solver_2d import LB2D_Solver_Single_Phase
 # Initialize Taichi
 # Try with default first, GPU if available.
 try:
-    ti.init(arch=ti.gpu, dynamic_index=False, kernel_profiler=False, print_ir=False)
+    # ti.init(arch=ti.gpu, dynamic_index=False, kernel_profiler=False, print_ir=False) # Old call
+    ti.init(arch=ti.gpu) # Simplified init
     print("Taichi initialized on GPU.")
 except RuntimeError:
-    ti.init(arch=ti.cpu, dynamic_index=False, kernel_profiler=False, print_ir=False)
+    # ti.init(arch=ti.cpu, dynamic_index=False, kernel_profiler=False, print_ir=False) # Old call
+    ti.init(arch=ti.cpu) # Simplified init
     print("Taichi initialized on CPU (GPU not available or failed).")
 
 
@@ -36,10 +38,10 @@ def calculate_analytical_poiseuille(G_effective, niu, H_channel, y_coords_physic
     # Ensure y_coords are relative to the start of the fluid domain (0 to H_channel)
     # H_channel = Ly - 2 for a pipe defined by Ly grid points with walls at 0 and Ly-1
     # y_physical should go from 0 (just above bottom wall) to H_channel (just below top wall)
-    
+
     # The formula u_x(y) = G/(2*nu) * y * (H-y) assumes y is from 0 to H (fluid domain height)
     # If y_coords_physical are already 0 to H, then it's direct.
-    
+
     velocity_profile = (G_effective / (2 * niu)) * y_coords_physical * (H_channel - y_coords_physical)
     return velocity_profile
 
@@ -81,7 +83,7 @@ def plot_results(y_coords_lbm, lbm_velocities, analytical_velocities, Ly, H_chan
     H_channel: actual fluid channel height
     """
     plt.figure(figsize=(8, 6))
-    
+
     # LBM data: y_coords_lbm are grid indices. Fluid domain is from y=1 to y=Ly-2.
     # Physical y for LBM: (y_grid_index - 0.5) if 0 is wall center.
     # Or, if walls are at 0 and Ly-1, fluid nodes are 1 to Ly-2.
@@ -91,12 +93,12 @@ def plot_results(y_coords_lbm, lbm_velocities, analytical_velocities, Ly, H_chan
                                                  # If y_coords_lbm are nodes 0..Ly-1, then fluid nodes 1..Ly-2
                                                  # Physical coords for these nodes: 0 .. H_channel-1 (if H_channel = Ly-2)
                                                  # So, y_coords_lbm[1:-1] - 1.0 should map to 0 to H_channel-1
-    
+
     # Create physical y-coordinates for analytical solution (0 to H_channel)
     # H_channel = Ly - 2 (number of fluid cells)
     # y_analytical_plot = np.linspace(0, H_channel, len(analytical_velocities)) #This assumes analytical_vel has H_channel points
     # The analytical solution was calculated on y_coords_physical which should match the LBM fluid nodes' physical locations.
-    
+
     # For plotting, we want y to go from 0 (bottom wall fluid interface) to H_channel (top wall fluid interface)
     # LBM results are at cell centers. y_coords_lbm[1:-1] are indices of fluid cells.
     # If Ly = 20, H_channel = 18. Fluid cells are 1, ..., 18.
@@ -104,7 +106,7 @@ def plot_results(y_coords_lbm, lbm_velocities, analytical_velocities, Ly, H_chan
     y_plot_lbm = (y_coords_lbm[1:Ly-1] - 1.0) + 0.5 # Centered points from 0.5 to H_channel - 0.5
 
     plt.plot(lbm_velocities[1:Ly-1], y_plot_lbm, 'bo-', label='LBM Simulation', markersize=5)
-    
+
     # Analytical solution is already calculated on physical coordinates 0 to H_channel
     # We need y points for analytical that match the LBM cell centers.
     # y_analytical_points_for_plot = np.linspace(0.5, H_channel - 0.5, H_channel) # if analytical has H_channel points
@@ -123,22 +125,33 @@ def plot_results(y_coords_lbm, lbm_velocities, analytical_velocities, Ly, H_chan
     print("Plot saved as poiseuille_flow_validation.png")
     plt.show()
 
+def calculate_discrepancy(lbm_velocities_fluid, analytical_velocities_fluid):
+    """
+    Calculates the Mean Squared Error (MSE) between LBM and analytical velocities.
+    Assumes both inputs are 1D NumPy arrays of the same length, corresponding to the fluid domain.
+    """
+    if len(lbm_velocities_fluid) != len(analytical_velocities_fluid):
+        raise ValueError("LBM and analytical velocity profiles must have the same length for discrepancy calculation.")
+
+    mse = np.mean((lbm_velocities_fluid - analytical_velocities_fluid)**2)
+    return mse
+
 if __name__ == "__main__":
     # Simulation Parameters
     Ly_grid = 30      # Number of grid points in y (including walls)
     Lx_grid = Ly_grid * 2  # Length of the pipe (for periodic, aspect ratio matters less for fully developed)
-    
+
     # Channel height H is the number of fluid cells. If walls are at y=0 and y=Ly_grid-1,
     # then there are Ly_grid-2 fluid cells.
-    H_actual_channel = Ly_grid - 2 
+    H_actual_channel = Ly_grid - 2
 
     # LBM parameters
     niu_lbm = 0.05     # Kinematic viscosity in LBM units
     fx_lbm = 1.0e-5   # Body force in x-direction (acts as G_effective if rho_avg=1)
     # G_effective for analytical solution. If using body force fx, G_eff = fx (assuming density is 1)
     # For pressure driven, G_eff = (P_in - P_out) / Lx_grid. Here, fx is direct.
-    G_eff = fx_lbm 
-    
+    G_eff = fx_lbm
+
     total_sim_iterations = 20000 # Number of iterations to reach steady state (adjust as needed)
 
     # 1. Create Geometry
@@ -156,17 +169,32 @@ if __name__ == "__main__":
     # Fluid cells are from index 1 to Ly_grid-2.
     # Physical y: 0.5, 1.5, ..., H_actual_channel-0.5
     y_physical_coords_for_analytical = np.linspace(0.5, H_actual_channel - 0.5, num=H_actual_channel)
-    
+
     analytical_velocity_profile = calculate_analytical_poiseuille(
         G_eff, niu_lbm, H_actual_channel, y_physical_coords_for_analytical
     )
 
     # 4. Plot Results
     # y_coords_for_lbm_plot are grid indices from 0 to Ly_grid-1
-    y_grid_indices_lbm = np.arange(Ly_grid) 
-    
+    y_grid_indices_lbm = np.arange(Ly_grid)
+
     plot_results(y_grid_indices_lbm, lbm_velocity_profile, analytical_velocity_profile, Ly_grid, H_actual_channel)
 
-    print("Validation script finished.")
+    # 5. Calculate and Print Discrepancy
+    # Ensure we are comparing only the fluid parts.
+    # lbm_velocity_profile includes walls (indices 0 and Ly_grid-1). Fluid is 1 to Ly_grid-2.
+    lbm_fluid_velocities = lbm_velocity_profile[1:Ly_grid-1]
 
-```
+    # analytical_velocity_profile is already for the H_actual_channel fluid points.
+    # Double check lengths to be sure:
+    if len(lbm_fluid_velocities) != len(analytical_velocity_profile):
+        print(f"Warning: Length mismatch for discrepancy calculation. LBM fluid: {len(lbm_fluid_velocities)}, Analytical: {len(analytical_velocity_profile)}")
+        # This might happen if y_physical_coords_for_analytical was defined with a different num
+        # compared to H_actual_channel, or if slicing lbm_profile is off.
+        # H_actual_channel = Ly_grid - 2. Slicing [1:Ly_grid-1] gives Ly_grid-1-1 = Ly_grid-2 elements. Correct.
+        # y_physical_coords_for_analytical = np.linspace(0.5, H_actual_channel - 0.5, num=H_actual_channel). Correct.
+
+    mse_discrepancy = calculate_discrepancy(lbm_fluid_velocities, analytical_velocity_profile)
+    print(f"Mean Squared Error (MSE) between LBM and analytical velocities: {mse_discrepancy:.6e}")
+
+    print("Validation script finished.")
