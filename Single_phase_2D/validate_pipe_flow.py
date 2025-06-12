@@ -127,14 +127,42 @@ def plot_results(y_coords_lbm, lbm_velocities, analytical_velocities, Ly, H_chan
 
 def calculate_discrepancy(lbm_velocities_fluid, analytical_velocities_fluid):
     """
-    Calculates the Mean Squared Error (MSE) between LBM and analytical velocities.
-    Assumes both inputs are 1D NumPy arrays of the same length, corresponding to the fluid domain.
+    Calculates the Mean Squared Error (MSE) and relative errors
+    between LBM and analytical velocities.
+    Assumes both inputs are 1D NumPy arrays of the same length,
+    corresponding to the fluid domain.
     """
     if len(lbm_velocities_fluid) != len(analytical_velocities_fluid):
         raise ValueError("LBM and analytical velocity profiles must have the same length for discrepancy calculation.")
 
+    # MSE calculation
     mse = np.mean((lbm_velocities_fluid - analytical_velocities_fluid)**2)
-    return mse
+
+    # Relative error calculation
+    abs_analytical = np.abs(analytical_velocities_fluid)
+    relative_error_pointwise = np.zeros_like(analytical_velocities_fluid, dtype=float) # Ensure float for division
+
+    # Mask for non-zero (or non-negligible) analytical values
+    non_zero_analytical_mask = abs_analytical > 1e-9
+
+    # Calculate pointwise relative error only where analytical solution is significant
+    relative_error_pointwise[non_zero_analytical_mask] = np.abs(
+        lbm_velocities_fluid[non_zero_analytical_mask] - analytical_velocities_fluid[non_zero_analytical_mask]
+    ) / abs_analytical[non_zero_analytical_mask]
+
+    # Extract valid relative errors for mean and max calculation
+    valid_points_for_rel_err = relative_error_pointwise[non_zero_analytical_mask]
+
+    if len(valid_points_for_rel_err) > 0:
+        mean_relative_error = np.mean(valid_points_for_rel_err)
+        max_relative_error = np.max(valid_points_for_rel_err)
+    else:
+        # This case should ideally not be hit for Poiseuille flow in the channel center.
+        # If it is, it means all analytical velocities were ~0, which is problematic.
+        mean_relative_error = np.nan
+        max_relative_error = np.nan
+
+    return mse, mean_relative_error, max_relative_error
 
 if __name__ == "__main__":
     # Simulation Parameters
@@ -194,7 +222,13 @@ if __name__ == "__main__":
         # H_actual_channel = Ly_grid - 2. Slicing [1:Ly_grid-1] gives Ly_grid-1-1 = Ly_grid-2 elements. Correct.
         # y_physical_coords_for_analytical = np.linspace(0.5, H_actual_channel - 0.5, num=H_actual_channel). Correct.
 
-    mse_discrepancy = calculate_discrepancy(lbm_fluid_velocities, analytical_velocity_profile)
-    print(f"Mean Squared Error (MSE) between LBM and analytical velocities: {mse_discrepancy:.6e}")
+    mse_discrepancy, mean_rel_err, max_rel_err = calculate_discrepancy(lbm_fluid_velocities, analytical_velocity_profile)
+    print(f"Mean Squared Error (MSE): {mse_discrepancy:.6e}")
+    if np.isnan(mean_rel_err):
+        print("Mean Relative Error: Not available (analytical solution might be zero everywhere).")
+        print("Maximum Relative Error: Not available (analytical solution might be zero everywhere).")
+    else:
+        print(f"Mean Relative Error: {mean_rel_err:.6%}") # Format as percentage
+        print(f"Maximum Relative Error: {max_rel_err:.6%}") # Format as percentage
 
     print("Validation script finished.")

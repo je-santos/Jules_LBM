@@ -318,41 +318,15 @@ class LB2D_Solver_Single_Phase:
         # pxx_eq = rho * (ux^2 - uy^2)
         # pxy_eq = rho * ux*uy
 
-        # Corrected meq for the given M matrix structure (common D2Q9 MRT)
         m_eq[0] = rho_local                                 # rho
         m_eq[1] = rho_local * (-2.0 + 3.0 * (ux2 + uy2))     # e
         m_eq[2] = rho_local * (1.0 - 1.5 * (ux2 + uy2))      # eps
-        m_eq[3] = rho_local * ux                            # jx
-        m_eq[4] = rho_local * (-1.0 + 1.5 * (ux2 + uy2)) * ux # qx (This is not simply -2*jx for M[4])
-                                                            # M[4] is [0, -2, 2, 0, 0, 1, -1, 1, -1], which is for qx' = qx - jx * const
-                                                            # So, qx_eq should be simplified or M is for a different qx.
-                                                            # If M[4] is for jx (scaled), then m_eq[4] = rho*ux. But M[3] is for jx.
-                                                            # Let's use the simpler definition for qx, qy as used in some MRT models:
-        m_eq[4] = rho_local * ux * (0.0) -2.0 * rho_local * ux # This seems like a typo in the 3D code's M adaptation.
-                                                            # For D2Q9 with M given:
-                                                            # m3_eq = jx = rho*ux
-                                                            # m4_eq = qx (often jx for first order, or higher order like 3*jx - 2*rho*ux*u^2)
-                                                            # The M[4] = [0,-2,2,0,0,1,-1,1,-1] suggests qx is related to (f1-f2 + f5-f6+f7-f8)
-                                                            # This is related to energy flux in x. Its eq: rho*ux. (No, this is jx).
-                                                            # qx_eq is often set to -jx for some MRT models.
-                                                            # Let's use standard hydrodynamic moments:
-        m_eq[3] = rho_local * ux                            # jx
-        m_eq[5] = rho_local * uy                            # jy
+        m_eq[3] = j_x                                       # jx (rho_local * ux)
+        m_eq[4] = 0.0                                       # qx (set to 0.0)
+        m_eq[5] = j_y                                       # jy (rho_local * uy)
+        m_eq[6] = 0.0                                       # qy (set to 0.0)
         m_eq[7] = rho_local * (ux2 - uy2)                   # pxx (stress xx)
         m_eq[8] = rho_local * ux * uy                       # pxy (stress xy)
-
-        # For qx, qy (moments m4, m6), these are often related to higher order terms or set to 0 for some models.
-        # Or they are related to jx, jy.
-        # For the given M matrix, m4 (qx) and m6 (qy) are usually non-zero at equilibrium.
-        # A common choice for the M provided: qx_eq = -jx, qy_eq = -jy or similar simple forms.
-        # Or, more accurately derived from Chapman-Enskog:
-        # qx_eq = rho_local * ux * (1 - (5/3)*(1/2)) where cs^2=1/3. This is complex.
-        # For Lallemand & Luo's M, qx_eq = rho*ux, qy_eq = rho*uy (if M entries are for these moments)
-        # Given M[4] is [0, -2, 2, ...], this suggests qx is not simply rho*ux.
-        # It is likely qx_eq is related to jx, e.g. qx_eq = -2/3 * jx or some other scaling.
-        # Let's assume for now: (This needs verification against the source of M and S_dig)
-        m_eq[4] = - (2.0/3.0) * j_x                          # qx (approximation often used)
-        m_eq[6] = - (2.0/3.0) * j_y                          # qy (approximation often used)
 
         return m_eq
 
@@ -579,15 +553,13 @@ class LB2D_Solver_Single_Phase:
 
                 self.rho[i,j] = current_f_sum
 
-                f_body_local = self.cal_local_force(i, j) # Body force F_b
+                # f_body_local = self.cal_local_force(i, j) # This line is removed as it's no longer used here
 
                 if self.rho[i,j] > 1e-6 : # Avoid division by zero if density is too low
                     self.v[i,j] /= self.rho[i,j]
-                    # Add force contribution to velocity (standard LBM, second-order accurate)
-                    # v = v_collisionless + dt * F_b / (2 * rho)
-                    # Here dt=1 (LBM units)
-                    if ti.static(self.force_flag == 1):
-                         self.v[i,j] += f_body_local / (2.0 * self.rho[i,j])
+                    # The following line related to direct force addition to velocity is removed:
+                    # if ti.static(self.force_flag == 1):
+                    #      self.v[i,j] += f_body_local / (2.0 * self.rho[i,j])
                 else: # Reset velocity if density is near zero
                     self.v[i,j] = ti.Vector([0.0,0.0])
                     self.rho[i,j] = 1e-6 # Prevent issues with zero density, though this indicates instability
