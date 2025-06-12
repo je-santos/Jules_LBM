@@ -1,0 +1,32 @@
+[Taichi] version 1.7.3, llvm 15.0.4, commit 5ec301be, linux, python 3.10.17
+[Taichi] Starting on arch=vulkan
+LB2D_Solver_Single_Phase class defined.
+[Taichi] Starting on arch=vulkan
+Taichi initialized on GPU.
+Initializing LBM simulation...
+Running LBM simulation for 20000 iterations...
+Iteration: 1000/20000, Max Velocity: 1.382844e-02
+Iteration: 2000/20000, Max Velocity: 1.793342e-02
+Iteration: 3000/20000, Max Velocity: 1.909976e-02
+Iteration: 4000/20000, Max Velocity: 1.943138e-02
+Iteration: 5000/20000, Max Velocity: 1.952590e-02
+Iteration: 6000/20000, Max Velocity: 1.955169e-02
+Iteration: 7000/20000, Max Velocity: 1.956100e-02
+Iteration: 8000/20000, Max Velocity: 1.956294e-02
+Iteration: 9000/20000, Max Velocity: 1.956333e-02
+Iteration: 10000/20000, Max Velocity: 1.956339e-02
+Iteration: 11000/20000, Max Velocity: 1.956342e-02
+Iteration: 12000/20000, Max Velocity: 1.956333e-02
+Iteration: 13000/20000, Max Velocity: 1.956322e-02
+Iteration: 14000/20000, Max Velocity: 1.956307e-02
+Iteration: 15000/20000, Max Velocity: 1.956297e-02
+Iteration: 16000/20000, Max Velocity: 1.956291e-02
+Iteration: 17000/20000, Max Velocity: 1.956271e-02
+Iteration: 18000/20000, Max Velocity: 1.956253e-02
+Iteration: 19000/20000, Max Velocity: 1.956242e-02
+Iteration: 20000/20000, Max Velocity: 1.956229e-02
+Plot saved as poiseuille_flow_validation.png
+Mean Squared Error (MSE): 1.397543e-10
+Mean Relative Error: 0.148620%
+Maximum Relative Error: 0.739759%
+Validation script finished.

@@ -340,74 +340,54 @@ class LB2D_Solver_Single_Phase:
     def colission(self):
         for i, j in self.rho: # Iterate over 2D grid
             if self.solid[i, j] == 0: # Fluid node
+                # Calculate rho_local and v_intermediate from F (post-streaming distributions)
+                rho_local = 0.0
+                v_intermediate = ti.Vector([0.0, 0.0])
+                for s_idx in ti.static(range(self.q_dim)):
+                    rho_local += self.F[i, j][s_idx]
+                    v_intermediate += self.e[s_idx] * self.F[i, j][s_idx]
+
+                v_corrected = ti.Vector([0.0, 0.0])
+                epsilon = 1e-9 # Small epsilon to avoid division by zero
+
+                if rho_local > epsilon:
+                    v_intermediate /= rho_local
+                    f_body = self.cal_local_force(i, j)
+                    # Correct velocity with force term (Guo forcing scheme)
+                    v_corrected = v_intermediate + f_body / (2.0 * rho_local)
+                else: # If rho_local is too small, use default values
+                    rho_local = 1.0 # Safe default density
+                    v_corrected = ti.Vector([0.0, 0.0]) # Zero velocity
+
                 # Calculate moments m from F
                 m_temp = self.M[None] @ self.F[i, j]
 
-                # Calculate equilibrium moments meq
-                meq = self.meq_vec(self.rho[i, j], self.v[i, j])
+                # Calculate equilibrium moments meq using corrected rho and velocity
+                meq = self.meq_vec(rho_local, v_corrected)
 
                 # Collision step in moment space (MRT)
                 m_coll = m_temp - self.S_dig[None] * (m_temp - meq)
 
                 # Force term (Guo et al. forcing scheme for MRT)
-                # F_s = M * Sigma_s * inv_M * S_force
-                # S_force_alpha = w_alpha * ( (e_alpha - u)/cs^2 + (e_alpha . u)e_alpha / cs^4 ) . F_body
-                # For MRT, the force term is added to the moments:
-                # delta_m_s = (I - S_diag/2) * M_s_alpha * F_alpha_prime
-                # F_alpha_prime = w_alpha * ( ( (e_alpha-u)/cs^2 + (e_alpha.u)e_alpha/cs^4 ).F_body )
-                # Simplified: Add source term in moment space
-                # Si = (1 - 0.5 * S_dig[i]) * Fi_source_moment
-                # Fi_source_moment = (M * source_dist_func)_i
-                # source_dist_func_alpha = w_alpha * ( (e_alpha-u)/cs^2 + (e_alpha.u)/cs^4 * (e_alpha.F_body) ) . F_body
-                # This is complex. A simpler Guo forcing for MRT:
-                # F_k' = (1 - 0.5*S_k) * (M * Psi_vec)_k
-                # Psi_vec_alpha = w_alpha * ( (e_alpha-u)/cs^2 + ( (e_alpha.u)*e_alpha )/cs^4 ) . force_vector
-
                 f_body = self.cal_local_force(i, j) # Get body force F_b
                 cs_sq = 1.0/3.0 # Sound speed squared
 
                 if ti.static(self.force_flag == 1):
-                    # Force term in moment space (Guo's scheme for MRT)
-                    # This is a common way to implement it.
-                    # F_m_i = (M_ij * Psi_j) * (1 - 0.5 * S_i)
-                    # Psi_j = w_j * [ ((ej-u)/cs^2) . F_b + ( (ej.u)*(ej.F_b) )/cs^4 - (u.F_b)/ (2*cs^4) ] NO, this is more complex than needed
-                    # Simpler: (M * source_term_in_f_space)_s * (1 - s_diag_s/2)
-                    # source_term_in_f_space_alpha = w_alpha * ( ( (e_alpha-u)/cs^2 + (e_alpha.u)/(cs^2*cs^2) * e_alpha ).F_b )
-                    # Let's use the one from the 3D code, adapted.
-                    # m_coll[s] += (1 - 0.5 * S_dig[s]) * f_guo_s
-                    # f_guo_s = sum_l ( M[s,l] * w[l] * ( ((e[l]-v)/cs^2).force + ((e[l].v)*(e[l].force))/(cs^2*cs^2) ) )
-                    # Note: The 3D code had force / 3.0 and force / 9.0. This implies cs^2 = 1/3.
-                    # So, (e-u).F / cs^2  and (e.u)(e.F) / cs^4.
-                    # The 3D code uses: w_l * ( (e_l-u).f/3 + (e_l.u)(e_l.f)/9 ) * M_sl
-                    # This corresponds to: w_l * ( (e_l-u).f/cs^2 + (e_l.u)(e_l.f)/(cs^2*cs^2) ) * M_sl if cs^2 = 1/3
-                    # This is the standard Guo forcing term for MRT.
-
                     force_moment_source = ti.Vector([0.0] * self.q_dim)
-                    vel_ij = self.v[i,j] # Current velocity at node
+                    # Use v_corrected as the velocity for calculating force moments
+                    vel_for_force_calc = v_corrected
 
                     for s_alpha in ti.static(range(self.q_dim)): # Loop over velocity directions for source term
-                        e_alpha_minus_u = self.e[s_alpha] - vel_ij
-                        e_alpha_dot_u = self.e[s_alpha].dot(vel_ij)
+                        e_alpha_minus_u = self.e[s_alpha] - vel_for_force_calc
+                        e_alpha_dot_u = self.e[s_alpha].dot(vel_for_force_calc)
                         e_alpha_dot_f_body = self.e[s_alpha].dot(f_body)
 
-                        # Guo's original source term for f_alpha (not moment space directly)
-                        # F_alpha_src = w_alpha * ( (e_alpha-u)/cs^2 . F_b + (e_alpha.u)(e_alpha.F_b)/cs^4 )
-                        # The 3D code's version:
-                        # f_guo_contrib = self.w[s_alpha] * ( (e_alpha_minus_u.dot(f_body) / cs_sq ) + \
-                        #                                   (e_alpha_dot_u * e_alpha_dot_f_body / (cs_sq*cs_sq) ) )
-                        # This is Psi_alpha. Then sum (M_s_l * Psi_l) for the moment source.
-                        # The 3D code was: sum_l M[s,l] * w[l] * ( ( (e[l]-v).dot(f)/3.0 ) + ( (e[l].dot(v))*(e[l].dot(f))/9.0 ) )
-                        # This is sum_l M[s,l] * Psi_l where Psi_l is the source term for f_l.
-
-                        # Let's calculate Psi_l (source term for distribution function f_l)
                         psi_l = self.w[s_alpha] * ( (e_alpha_minus_u.dot(f_body) / cs_sq) + \
                                                 (e_alpha_dot_u * e_alpha_dot_f_body / (cs_sq * cs_sq)) )
 
-                        # Add to the moment source: M_s_l * psi_l
                         for s_moment_idx in ti.static(range(self.q_dim)):
                             force_moment_source[s_moment_idx] += self.M[None][s_moment_idx, s_alpha] * psi_l
 
-                    # Add to collided moments
                     for s_idx in ti.static(range(self.q_dim)):
                         m_coll[s_idx] += (1.0 - 0.5 * self.S_dig[None][s_idx]) * force_moment_source[s_idx]
 
