@@ -439,13 +439,39 @@ class LB2D_Solver_Single_Phase:
                         # Here, simpler: reconstruct all f from feq at boundary rho and extrapolated/boundary v.
                         # For fixed pressure BC, velocity is often extrapolated or taken from the inner node.
                         vel_b = self.v[0, j_coord] # Default to current velocity at boundary if not specified
-                        if self.solid[1, j_coord] > 0: # If inner node is solid, this might be problematic
-                             vel_b = ti.Vector([self.vx_bcxl, self.vy_bcxl]) # Use specified BC velocity if inner is solid
+                        if self.solid[1, j_coord] > 0: # If inner node is solid
+                            ux_0 = 0.0 # Default to 0 if no inner fluid cell to extrapolate from
                         else: # Inner node is fluid
-                             vel_b = self.v[1, j_coord] # Extrapolate velocity from the first fluid layer inside
+                            ux_0 = self.v[1, j_coord][0]
 
-                        for s_idx in ti.static(range(self.q_dim)):
-                            self.F[0, j_coord][s_idx] = self.feq(s_idx, rho_b, vel_b)
+                        rho_0 = self.rho_bcxl  # Specified inlet density
+                        # uy_0 = 0.0 is implicitly handled by Zou-He for D2Q9 if not specified for f3/f4 balance
+
+                        # Known populations from previous collision at this node (0,j), which are stored in self.f
+                        # These are f_i(x_b, t) which are post-collision, pre-streaming from previous step
+                        # For Zou-He, we use these as approximations of f_i(x_b, t+dt_collision) for known directions
+                        f0_b = self.f[0,j_coord][0]
+                        f2_b = self.f[0,j_coord][2]
+                        f3_b = self.f[0,j_coord][3]
+                        f4_b = self.f[0,j_coord][4]
+                        f6_b = self.f[0,j_coord][6]
+                        f7_b = self.f[0,j_coord][7]
+
+                        # Calculate unknown populations (those pointing into the fluid domain: f1, f5, f8 for left wall)
+                        # Note: Original Zou-He uses uy_0 for f5, f8. Here, simplified uy_0 = 0.
+                        self.F[0,j_coord][1] = f2_b + (2.0/3.0)*rho_0*ux_0
+                        self.F[0,j_coord][5] = f6_b - 0.5*(f3_b-f4_b) + (1.0/6.0)*rho_0*ux_0
+                        self.F[0,j_coord][8] = f7_b + 0.5*(f3_b-f4_b) + (1.0/6.0)*rho_0*ux_0
+
+                        # Copy known populations to F (destination for streaming)
+                        # These are populations that were already determined by collision at (0,j) in the previous step
+                        # and are either parallel to the wall or pointing out of the domain (and thus known pre-streaming).
+                        self.F[0,j_coord][0] = f0_b
+                        self.F[0,j_coord][2] = f2_b
+                        self.F[0,j_coord][3] = f3_b
+                        self.F[0,j_coord][4] = f4_b
+                        self.F[0,j_coord][6] = f6_b
+                        self.F[0,j_coord][7] = f7_b
 
                     elif ti.static(self.bc_x_left == 2): # Fix velocity
                         rho_b = self.rho[0,j_coord] # Use current density (or from neighbor: self.rho[1,j_coord])
@@ -462,14 +488,35 @@ class LB2D_Solver_Single_Phase:
                 if self.solid[self.nx - 1, j_coord] == 0:
                     if ti.static(self.bc_x_right == 1): # Fix pressure
                         rho_b = self.rho_bcxr
-                        vel_b = self.v[self.nx-1, j_coord]
-                        if self.solid[self.nx-2, j_coord] > 0:
-                            vel_b = ti.Vector([self.vx_bcxr, self.vy_bcxr])
-                        else:
-                            vel_b = self.v[self.nx-2, j_coord]
+                        vel_b = self.v[self.nx-1, j_coord] # Default to current velocity at boundary
+                        if self.solid[self.nx-2, j_coord] > 0: # If inner node is solid
+                            ux_L = 0.0 # Default to 0
+                        else: # Inner node is fluid
+                            ux_L = self.v[self.nx-2, j_coord][0]
 
-                        for s_idx in ti.static(range(self.q_dim)):
-                            self.F[self.nx - 1, j_coord][s_idx] = self.feq(s_idx, rho_b, vel_b)
+                        rho_L = self.rho_bcxr  # Specified outlet density
+                        # uy_L = 0.0 is implicitly handled
+
+                        # Known populations from previous collision at this node (self.nx-1, j_coord)
+                        f0_b = self.f[self.nx-1,j_coord][0]
+                        f1_b = self.f[self.nx-1,j_coord][1]
+                        f3_b = self.f[self.nx-1,j_coord][3]
+                        f4_b = self.f[self.nx-1,j_coord][4]
+                        f5_b = self.f[self.nx-1,j_coord][5]
+                        f8_b = self.f[self.nx-1,j_coord][8]
+
+                        # Calculate unknown populations (those pointing into the fluid domain: f2, f6, f7 for right wall)
+                        self.F[self.nx-1,j_coord][2] = f1_b - (2.0/3.0)*rho_L*ux_L
+                        self.F[self.nx-1,j_coord][6] = f5_b + 0.5*(f3_b-f4_b) - (1.0/6.0)*rho_L*ux_L
+                        self.F[self.nx-1,j_coord][7] = f8_b - 0.5*(f3_b-f4_b) - (1.0/6.0)*rho_L*ux_L
+
+                        # Copy known populations
+                        self.F[self.nx-1,j_coord][0] = f0_b
+                        self.F[self.nx-1,j_coord][1] = f1_b
+                        self.F[self.nx-1,j_coord][3] = f3_b
+                        self.F[self.nx-1,j_coord][4] = f4_b
+                        self.F[self.nx-1,j_coord][5] = f5_b
+                        self.F[self.nx-1,j_coord][8] = f8_b
 
                     elif ti.static(self.bc_x_right == 2): # Fix velocity
                         rho_b = self.rho[self.nx-2,j_coord] if self.solid[self.nx-2,j_coord]==0 else self.rho_bcxr
